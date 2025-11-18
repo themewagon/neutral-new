@@ -39,46 +39,76 @@ jobs:
       - name: Update paths for GitHub Pages
         run: |
           BASE_URL="/neutral-new"
-          # Process each HTML file
-          find . -name "*.html" -type f ! -path "./vendors/*" ! -path "./node_modules/*" ! -path "./.git/*" | while read file; do
-            # Get the directory of the file relative to root
-            file_dir=$(dirname "$file" | sed 's|^\./||')
-            if [ "$file_dir" = "." ]; then
-              file_dir=""
-            fi
-            
-            # 1. Handle ../src/ and ../vendors/ paths first (resolve to root)
-            sed -i "s|href=\"\.\./src/|href=\"$BASE_URL/src/|g" "$file"
-            sed -i "s|src=\"\.\./src/|src=\"$BASE_URL/src/|g" "$file"
-            sed -i "s|href=\"\.\./vendors/|href=\"$BASE_URL/vendors/|g" "$file"
-            sed -i "s|src=\"\.\./vendors/|src=\"$BASE_URL/vendors/|g" "$file"
-            
-            # 2. Handle root-level src/ and vendors/ paths (but skip if already processed)
-            sed -i "s|href=\"src/|href=\"$BASE_URL/src/|g" "$file"
-            sed -i "s|src=\"src/|src=\"$BASE_URL/src/|g" "$file"
-            sed -i "s|href=\"vendors/|href=\"$BASE_URL/vendors/|g" "$file"
-            sed -i "s|src=\"vendors/|src=\"$BASE_URL/vendors/|g" "$file"
-            
-            # 3. Handle ../ HTML links (resolve to root) - must come before same-dir links
-            sed -i "s|href=\"\.\./\([^\"#]*\.html\)\"|href=\"$BASE_URL/\1\"|g" "$file"
-            
-            # 4. Handle same-directory HTML links (prepend full path)
-            # Only match links that don't start with /, ../, http, https, #, or mailto
-            if [ -n "$file_dir" ]; then
-              # File is in a subdirectory, so same-dir links need full path
-              # Match: href="filename.html" but not href="../file.html" or href="/file.html"
-              sed -i "s|href=\"\([^/\"#h]*\.html\)\"|href=\"$BASE_URL/$file_dir/\1\"|g" "$file"
-            else
-              # File is in root, so same-dir links are root-level
-              sed -i "s|href=\"\([^/\"#h]*\.html\)\"|href=\"$BASE_URL/\1\"|g" "$file"
-            fi
-            
-            # 5. Handle root-level HTML links (already absolute from root, but not our base URL)
-            sed -i "s|href=\"/\([^\"#]*\.html\)\"|href=\"$BASE_URL/\1\"|g" "$file"
-            
-            # 6. Fix double slashes
-            sed -i "s|$BASE_URL//|$BASE_URL/|g" "$file"
-          done
+          python3 << 'PYTHON_SCRIPT'
+          import os
+          import re
+          from pathlib import Path
+
+          base_url = "/neutral-new"
+
+          # Find all HTML files
+          html_files = []
+          for root, dirs, files in os.walk('.'):
+              # Skip vendor and node_modules directories
+              dirs[:] = [d for d in dirs if d not in ['vendors', 'node_modules', '.git']]
+              for file in files:
+                  if file.endswith('.html'):
+                      html_files.append(os.path.join(root, file))
+
+          for file_path in html_files:
+              with open(file_path, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              
+              # Get directory relative to root
+              file_dir = os.path.dirname(file_path).lstrip('./')
+              if file_dir == '.':
+                  file_dir = ''
+              
+              # Function to check if link already has base URL
+              def has_base_url(match):
+                  return base_url in match.group(0)
+              
+              # 1. Handle ../src/ and ../vendors/ paths
+              content = re.sub(r'(href|src)="\.\./(src|vendors)/', 
+                              lambda m: f'{m.group(1)}="{base_url}/{m.group(2)}/' if base_url not in m.group(0) else m.group(0),
+                              content)
+              
+              # 2. Handle root-level src/ and vendors/ paths (skip if already has base_url)
+              content = re.sub(r'(href|src)="(?!' + re.escape(base_url) + r'/)(src|vendors)/',
+                              lambda m: f'{m.group(1)}="{base_url}/{m.group(2)}/',
+                              content)
+              
+              # 3. Handle ../ HTML links
+              content = re.sub(r'href="\.\./(?!' + re.escape(base_url) + r'/)([^"#]*\.html)"',
+                              lambda m: f'href="{base_url}/{m.group(1)}"',
+                              content)
+              
+              # 4. Handle same-directory HTML links
+              if file_dir:
+                  # File is in subdirectory
+                  content = re.sub(r'href="(?!' + re.escape(base_url) + r'/|\.\./|/|https?://|mailto:|#)([^/"#h]*\.html)"',
+                                  lambda m: f'href="{base_url}/{file_dir}/{m.group(1)}"',
+                                  content)
+              else:
+                  # File is in root
+                  content = re.sub(r'href="(?!' + re.escape(base_url) + r'/|\.\./|/|https?://|mailto:|#)([^/"#h]*\.html)"',
+                                  lambda m: f'href="{base_url}/{m.group(1)}"',
+                                  content)
+              
+              # 5. Handle root-level HTML links starting with /
+              content = re.sub(r'href="/?(?!' + re.escape(base_url) + r'/)([^"#]*\.html)"',
+                              lambda m: f'href="{base_url}/{m.group(1)}"',
+                              content)
+              
+              # 6. Clean up duplicates
+              content = content.replace(base_url + base_url, base_url)
+              content = content.replace(base_url + '//', base_url + '/')
+              
+              with open(file_path, 'w', encoding='utf-8') as f:
+                  f.write(content)
+
+          print("✓ All paths updated successfully!")
+          PYTHON_SCRIPT
 
       - name: Build project
         run: npm run build || echo "Build step skipped (no build script or build failed)"
