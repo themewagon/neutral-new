@@ -39,19 +39,44 @@ jobs:
       - name: Update paths for GitHub Pages
         run: |
           BASE_URL="/neutral-new"
-          # Update asset paths (src/, vendors/) - these are always from root
+          # Process each HTML file
           find . -name "*.html" -type f ! -path "./vendors/*" ! -path "./node_modules/*" ! -path "./.git/*" | while read file; do
-            # Update src/ paths
+            # Get the directory of the file relative to root
+            file_dir=$(dirname "$file" | sed 's|^\./||')
+            if [ "$file_dir" = "." ]; then
+              file_dir=""
+            fi
+            
+            # 1. Handle ../src/ and ../vendors/ paths first (resolve to root)
+            sed -i "s|href=\"\.\./src/|href=\"$BASE_URL/src/|g" "$file"
+            sed -i "s|src=\"\.\./src/|src=\"$BASE_URL/src/|g" "$file"
+            sed -i "s|href=\"\.\./vendors/|href=\"$BASE_URL/vendors/|g" "$file"
+            sed -i "s|src=\"\.\./vendors/|src=\"$BASE_URL/vendors/|g" "$file"
+            
+            # 2. Handle root-level src/ and vendors/ paths (but skip if already processed)
             sed -i "s|href=\"src/|href=\"$BASE_URL/src/|g" "$file"
             sed -i "s|src=\"src/|src=\"$BASE_URL/src/|g" "$file"
-            # Update vendors/ paths
             sed -i "s|href=\"vendors/|href=\"$BASE_URL/vendors/|g" "$file"
             sed -i "s|src=\"vendors/|src=\"$BASE_URL/vendors/|g" "$file"
-            # Update relative HTML links (skip if already has http/https/mailto/#)
-            sed -i "s|href=\"\([^#\"h]*\.html\)\"|href=\"$BASE_URL/\1\"|g" "$file"
-            # Handle ../ paths in subdirectories (like docs/)
+            
+            # 3. Handle ../ HTML links (resolve to root) - must come before same-dir links
             sed -i "s|href=\"\.\./\([^\"#]*\.html\)\"|href=\"$BASE_URL/\1\"|g" "$file"
-            # Fix double slashes
+            
+            # 4. Handle same-directory HTML links (prepend full path)
+            # Only match links that don't start with /, ../, http, https, #, or mailto
+            if [ -n "$file_dir" ]; then
+              # File is in a subdirectory, so same-dir links need full path
+              # Match: href="filename.html" but not href="../file.html" or href="/file.html"
+              sed -i "s|href=\"\([^/\"#h]*\.html\)\"|href=\"$BASE_URL/$file_dir/\1\"|g" "$file"
+            else
+              # File is in root, so same-dir links are root-level
+              sed -i "s|href=\"\([^/\"#h]*\.html\)\"|href=\"$BASE_URL/\1\"|g" "$file"
+            fi
+            
+            # 5. Handle root-level HTML links (already absolute from root, but not our base URL)
+            sed -i "s|href=\"/\([^\"#]*\.html\)\"|href=\"$BASE_URL/\1\"|g" "$file"
+            
+            # 6. Fix double slashes
             sed -i "s|$BASE_URL//|$BASE_URL/|g" "$file"
           done
 
