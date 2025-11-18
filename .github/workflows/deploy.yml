@@ -95,8 +95,9 @@ jobs:
                                   lambda m: f'href="{base_url}/{m.group(1)}"',
                                   content)
               
-              # 5. Handle root-level HTML links starting with /
-              content = re.sub(r'href="/?(?!' + re.escape(base_url) + r'/)([^"#]*\.html)"',
+              # 5. Handle root-level HTML links starting with / (only match explicit / links)
+              # Changed /? to / to avoid matching same-dir links that step 4 handles
+              content = re.sub(r'href="/(?!' + re.escape(base_url) + r'/)([^"#]*\.html)"',
                               lambda m: f'href="{base_url}/{m.group(1)}"',
                               content)
               
