@@ -1,0 +1,79 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Update paths for GitHub Pages
+        run: |
+          BASE_URL="/neutral-new"
+          # Update asset paths (src/, vendors/) - these are always from root
+          find . -name "*.html" -type f ! -path "./vendors/*" ! -path "./node_modules/*" ! -path "./.git/*" | while read file; do
+            # Update src/ paths
+            sed -i "s|href=\"src/|href=\"$BASE_URL/src/|g" "$file"
+            sed -i "s|src=\"src/|src=\"$BASE_URL/src/|g" "$file"
+            # Update vendors/ paths
+            sed -i "s|href=\"vendors/|href=\"$BASE_URL/vendors/|g" "$file"
+            sed -i "s|src=\"vendors/|src=\"$BASE_URL/vendors/|g" "$file"
+            # Update relative HTML links (skip if already has http/https/mailto/#)
+            sed -i "s|href=\"\([^#\"h]*\.html\)\"|href=\"$BASE_URL/\1\"|g" "$file"
+            # Handle ../ paths in subdirectories (like docs/)
+            sed -i "s|href=\"\.\./\([^\"#]*\.html\)\"|href=\"$BASE_URL/\1\"|g" "$file"
+            # Fix double slashes
+            sed -i "s|$BASE_URL//|$BASE_URL/|g" "$file"
+          done
+
+      - name: Build project
+        run: npm run build || echo "Build step skipped (no build script or build failed)"
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "."
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
